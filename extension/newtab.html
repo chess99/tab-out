@@ -28,17 +28,14 @@
       display: block;
     }
 
-    /* Fallback overlay — shown only when the local server is not running */
+    /* Fallback overlay — shown only when the local server is not running.
+       Hidden by default via the .hidden class on the element. */
     #fallback {
-      display: none; /* hidden by default; newtab.js shows it on server failure */
       position: fixed;
       inset: 0;
       background: #f8f5f0;
       font-family: Georgia, serif;
       color: #3a2e22;
-
-      /* Center the content vertically and horizontally */
-      display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
@@ -47,9 +44,14 @@
       padding: 32px;
     }
 
-    /* We set display:none via JS, so we need this utility class too */
+    /* Utility: hide elements. newtab.js removes this class to show fallback. */
     .hidden {
       display: none !important;
+    }
+
+    /* When fallback is visible (not .hidden), use flex layout */
+    #fallback:not(.hidden) {
+      display: flex;
     }
 
     #fallback h1 {

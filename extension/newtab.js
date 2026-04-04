@@ -47,7 +47,8 @@ window.addEventListener('message', async (event) => {
   // Security: only accept messages from our dashboard origin
   if (event.origin !== 'http://localhost:3456') return;
 
-  const { messageId, action, payload } = event.data || {};
+  const msg = event.data || {};
+  const { messageId, action } = msg;
   if (!messageId || !action) return; // Ignore malformed messages
 
   let response;
@@ -57,16 +58,23 @@ window.addEventListener('message', async (event) => {
       response = await handleGetTabs();
 
     } else if (action === 'closeTabs') {
-      response = await handleCloseTabs(payload);
+      // Dashboard sends urls flat: { action, messageId, urls: [...] }
+      response = await handleCloseTabs({ urls: msg.urls });
 
     } else if (action === 'focusTabs') {
-      response = await handleFocusTabs(payload);
+      // Dashboard sends urls as an array; we focus the first match
+      response = await handleFocusTabs({ urls: msg.urls });
 
     } else {
       response = { error: `Unknown action: ${action}` };
     }
   } catch (err) {
     response = { error: err.message };
+  }
+
+  // Always include success flag — the dashboard checks for it
+  if (!response.error) {
+    response.success = true;
   }
 
   // Send the response back to the dashboard inside the iframe
@@ -141,21 +149,22 @@ async function handleCloseTabs({ urls = [] } = {}) {
  *
  * @param {Object} payload - { url: string }
  */
-async function handleFocusTabs({ url } = {}) {
-  if (!url) return { error: 'No URL provided' };
+async function handleFocusTabs({ urls = [] } = {}) {
+  if (!urls || urls.length === 0) return { error: 'No URLs provided' };
 
-  let targetHostname;
-  try {
-    targetHostname = new URL(url).hostname;
-  } catch {
-    return { error: 'Invalid URL' };
-  }
+  // Extract hostnames from all URLs we want to match
+  const targetHostnames = urls.map(u => {
+    try { return new URL(u).hostname; }
+    catch { return null; }
+  }).filter(Boolean);
+
+  if (targetHostnames.length === 0) return { error: 'No valid URLs' };
 
   const allTabs = await chrome.tabs.query({});
 
-  // Find the first tab whose hostname matches
+  // Find the first tab whose hostname matches any target
   const matchingTab = allTabs.find(tab => {
-    try { return new URL(tab.url).hostname === targetHostname; }
+    try { return targetHostnames.includes(new URL(tab.url).hostname); }
     catch { return false; }
   });
 

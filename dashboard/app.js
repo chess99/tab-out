@@ -204,11 +204,13 @@ function getOpenTabsForMission(missionUrls) {
   if (!missionUrls || missionUrls.length === 0 || openTabs.length === 0) return [];
 
   // Extract the domains from the mission's saved URLs
-  const missionDomains = missionUrls.map(url => {
+  // missionUrls can be either URL strings or objects with a .url property
+  const missionDomains = missionUrls.map(item => {
+    const urlStr = (typeof item === 'string') ? item : (item.url || '');
     try {
-      return new URL(url.startsWith('http') ? url : 'https://' + url).hostname;
+      return new URL(urlStr.startsWith('http') ? urlStr : 'https://' + urlStr).hostname;
     } catch {
-      return url; // fallback: use the raw string
+      return urlStr;
     }
   });
 
@@ -275,7 +277,7 @@ function renderMissionCard(mission, openTabCount) {
     tagLabel = 'Active';
   } else {
     // For cooling/abandoned, show a human-friendly age like "1 day" or "2 days"
-    tagLabel = timeAgo(mission.lastVisited)
+    tagLabel = timeAgo(mission.last_activity)
       .replace(' ago', '')
       .replace('yesterday', '1 day')
       .replace(' hrs', 'h')
@@ -292,7 +294,7 @@ function renderMissionCard(mission, openTabCount) {
     : '';
 
   // Page chips — show up to 4 URLs, truncated to 40 characters each
-  const pages = (mission.pages || []).slice(0, 4);
+  const pages = (mission.urls || []).slice(0, 4);
   const pageChips = pages.map(page => {
     // Use the title if available, otherwise the URL
     const label = page.title || page.url || page;
@@ -301,10 +303,10 @@ function renderMissionCard(mission, openTabCount) {
   }).join('');
 
   // Meta section (top-right of card): time + page count
-  const pageCount = (mission.pages || []).length;
+  const pageCount = (mission.urls || []).length;
   const metaHtml = `
     <div class="mission-meta">
-      <div class="mission-time">${timeAgo(mission.lastVisited)}</div>
+      <div class="mission-time">${timeAgo(mission.last_activity)}</div>
       <div class="mission-page-count">${pageCount}</div>
       <div class="mission-page-label">pages</div>
     </div>`;
@@ -461,13 +463,13 @@ async function renderDashboard() {
   // A "stale tab" is a browser tab that belongs to a mission that is NOT currently active.
   // These are tabs Zara left open but isn't actively working on — clutter she can clear.
   const activeMissionUrls = new Set(
-    activeMissions.flatMap(m => (m.pages || []).map(p => p.url || p))
+    activeMissions.flatMap(m => (m.urls || []))
   );
 
   const staleTabs = openTabs.filter(tab => {
     // Does this tab match any active mission? If not, it's stale.
     const matchesActive = activeMissions.some(m => {
-      return getOpenTabsForMission((m.pages || []).map(p => p.url || p))
+      return getOpenTabsForMission((m.urls || []))
         .some(t => t.url === tab.url);
     });
     return !matchesActive;
@@ -504,7 +506,7 @@ async function renderDashboard() {
   if (activeMissions.length > 0 && activeSection) {
     activeSectionCount.textContent = `${activeMissions.length} mission${activeMissions.length !== 1 ? 's' : ''}`;
     activeMissionsEl.innerHTML = activeMissions.map(m => {
-      const tabCount = countOpenTabsForMission((m.pages || []).map(p => p.url || p));
+      const tabCount = countOpenTabsForMission((m.urls || []));
       return renderMissionCard(m, tabCount);
     }).join('');
     activeSection.style.display = 'block';
@@ -520,7 +522,7 @@ async function renderDashboard() {
   if (abandonedMissions.length > 0 && abandonedSection) {
     abandonedSectionCount.textContent = `${abandonedMissions.length} mission${abandonedMissions.length !== 1 ? 's' : ''}`;
     abandonedMissionsEl.innerHTML = abandonedMissions.map(m => {
-      const tabCount = countOpenTabsForMission((m.pages || []).map(p => p.url || p));
+      const tabCount = countOpenTabsForMission((m.urls || []));
       return renderMissionCard(m, tabCount);
     }).join('');
     abandonedSection.style.display = 'block';
@@ -544,9 +546,8 @@ async function renderDashboard() {
       const statsRes = await fetch('/api/stats');
       if (statsRes.ok) {
         const stats = await statsRes.json();
-        const refreshedAt = stats.lastRefreshed || stats.updatedAt;
-        lastRefreshEl.textContent = refreshedAt
-          ? `Last analyzed ${timeAgo(refreshedAt)}`
+        lastRefreshEl.textContent = stats.lastAnalysis
+          ? `Last analyzed ${timeAgo(stats.lastAnalysis)}`
           : 'Last analyzed just now';
       } else {
         lastRefreshEl.textContent = 'Last analyzed just now';
@@ -601,7 +602,7 @@ document.addEventListener('click', async (e) => {
     const mission = await fetchMissionById(missionId);
     if (!mission) return;
 
-    const urls = (mission.pages || []).map(p => p.url || p);
+    const urls = (mission.urls || []).map(u => u.url);
     await closeTabsByUrls(urls);
 
     // Remove the badge from the card (no tabs left open)
@@ -629,7 +630,7 @@ document.addEventListener('click', async (e) => {
     const mission = await fetchMissionById(missionId);
     if (!mission) return;
 
-    const urls = (mission.pages || []).map(p => p.url || p);
+    const urls = (mission.urls || []).map(u => u.url);
     await closeTabsByUrls(urls);
 
     // Tell the server to archive this mission
@@ -660,7 +661,7 @@ document.addEventListener('click', async (e) => {
       : 0;
 
     if (parseInt(tabCount) > 0) {
-      const urls = (mission.pages || []).map(p => p.url || p);
+      const urls = (mission.urls || []).map(u => u.url);
       await closeTabsByUrls(urls);
     }
 
@@ -686,7 +687,7 @@ document.addEventListener('click', async (e) => {
     const mission = await fetchMissionById(missionId);
     if (!mission) return;
 
-    const urls = (mission.pages || []).map(p => p.url || p);
+    const urls = (mission.urls || []).map(u => u.url);
     await focusTabsByUrls(urls);
     showToast(`Focused on "${mission.name}"`);
   }
@@ -713,7 +714,7 @@ async function handleCloseAllStale() {
   } catch { /* silent fail */ }
 
   const nonActiveMissions = missions.filter(m => m.status !== 'active');
-  const urlsToClose = nonActiveMissions.flatMap(m => (m.pages || []).map(p => p.url || p));
+  const urlsToClose = nonActiveMissions.flatMap(m => (m.urls || []));
 
   await closeTabsByUrls(urlsToClose);
 
@@ -824,7 +825,7 @@ async function updateStaleCount() {
 
   const staleTabs = openTabs.filter(tab => {
     const matchesActive = activeMissions.some(m => {
-      return getOpenTabsForMission((m.pages || []).map(p => p.url || p))
+      return getOpenTabsForMission((m.urls || []))
         .some(t => t.url === tab.url);
     });
     return !matchesActive;
