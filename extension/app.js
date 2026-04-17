@@ -1204,7 +1204,8 @@ async function renderDomainView(realTabs) {
 
   if (domainGroups.length > 0 && openTabsSection) {
     if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Open tabs';
-    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
+    const toggleHtml = tabGroupsList.length > 0 ? `<span class="view-toggle"><button class="toggle-pill" data-action="switch-view" data-view="group">Groups</button><button class="toggle-pill active" data-action="switch-view" data-view="domain">Domains</button></span>&nbsp;&nbsp;` : '';
+    openTabsSectionCount.innerHTML = `${toggleHtml}${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
     openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     openTabsSection.style.display = 'block';
   } else if (openTabsSection) {
