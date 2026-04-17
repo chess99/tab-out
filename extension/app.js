@@ -1093,6 +1093,21 @@ const CHROME_GROUP_COLORS = {
 };
 
 /**
+ * buildViewToggle(activeView)
+ *
+ * Returns the HTML for the Groups/Domains toggle pill.
+ * Only shown when Chrome tab groups exist (tabGroupsList.length > 0).
+ * activeView: 'group' | 'domain'
+ */
+function buildViewToggle(activeView) {
+  if (tabGroupsList.length === 0) return '';
+  return `<span class="view-toggle">` +
+    `<button class="toggle-pill${activeView === 'group' ? ' active' : ''}" data-action="switch-view" data-view="group">Groups</button>` +
+    `<button class="toggle-pill${activeView === 'domain' ? ' active' : ''}" data-action="switch-view" data-view="domain">Domains</button>` +
+    `</span>&nbsp;&nbsp;`;
+}
+
+/**
  * renderDomainView(realTabs)
  *
  * Groups realTabs by domain and renders domain cards.
@@ -1204,8 +1219,7 @@ async function renderDomainView(realTabs) {
 
   if (domainGroups.length > 0 && openTabsSection) {
     if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Open tabs';
-    const toggleHtml = tabGroupsList.length > 0 ? `<span class="view-toggle"><button class="toggle-pill" data-action="switch-view" data-view="group">Groups</button><button class="toggle-pill active" data-action="switch-view" data-view="domain">Domains</button></span>&nbsp;&nbsp;` : '';
-    openTabsSectionCount.innerHTML = `${toggleHtml}${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
+    openTabsSectionCount.innerHTML = `${buildViewToggle('domain')}${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
     openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     openTabsSection.style.display = 'block';
   } else if (openTabsSection) {
@@ -1258,14 +1272,7 @@ async function renderGroupView(viewMode) {
 
   // Render section header with toggle + count
   if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Open tabs';
-  const closeAllId = 'close-all-open-tabs-group';
-  openTabsSectionCount.innerHTML = `
-    <span class="view-toggle">
-      <button class="toggle-pill ${viewMode === 'group' ? 'active' : ''}" data-action="switch-view" data-view="group">Groups</button>
-      <button class="toggle-pill" data-action="switch-view" data-view="domain">Domains</button>
-    </span>
-    &nbsp;&nbsp;${groupCount} group${groupCount !== 1 ? 's' : ''}${ungroupedCount > 0 ? ` · ${ungroupedCount} ungrouped` : ''}
-    &nbsp;&nbsp;<button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
+  openTabsSectionCount.innerHTML = `${buildViewToggle('group')}${groupCount} group${groupCount !== 1 ? 's' : ''}${ungroupedCount > 0 ? ` · ${ungroupedCount} ungrouped` : ''} &nbsp;&nbsp;<button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
 
   // Render group cards + ungrouped section
   let html = '';
