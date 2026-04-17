@@ -871,14 +871,14 @@ const ICON_WINDOW = `<svg class="chip-protected-icon chip-window-icon" xmlns="ht
  * buildPageChip(tab, label, urlCounts, domainHint)
  *
  * Builds one tab chip row HTML. Handles pinned/standalone-window visual treatment.
- * Protected tabs get a badge icon and no close button.
+ * Protected tabs show a badge icon before the favicon, and keep the close button
+ * (individual close still works; only bulk "Close all" skips them).
  */
 function buildPageChip(tab, label, urlCounts, domainHint = '') {
   const count     = urlCounts[tab.url] || 1;
   const dupeTag   = count > 1 ? ` <span class="chip-dupe-badge">(${count}x)</span>` : '';
   const isPinned  = tab.pinned;
   const isAlone   = tab.isAloneInWindow;
-  const protected_ = isPinned || isAlone;
 
   let chipClass = '';
   if (count > 1)  chipClass += ' chip-has-dupes';
@@ -891,20 +891,24 @@ function buildPageChip(tab, label, urlCounts, domainHint = '') {
   try { domain = new URL(tab.url).hostname; } catch {}
   const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
 
-  const protectedBadge = isPinned ? ICON_PIN : (isAlone ? ICON_WINDOW : '');
-
-  const closeBtn = protected_ ? '' : `
-        <button class="chip-action chip-close" data-action="close-single-tab" data-tab-url="${safeUrl}" title="Close this tab">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-        </button>`;
+  // Badge overlaid on favicon corner — no extra horizontal space, rows stay aligned
+  const badgeOverlay = isPinned
+    ? ICON_PIN
+    : (isAlone ? ICON_WINDOW : '');
+  const faviconHtml = faviconUrl
+    ? `<span class="chip-favicon-wrap">${badgeOverlay}<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'"></span>`
+    : (badgeOverlay ? `<span class="chip-favicon-wrap chip-favicon-wrap--no-img">${badgeOverlay}</span>` : '');
 
   return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
-      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
-      <span class="chip-text">${label}</span>${dupeTag}${protectedBadge}
+      ${faviconHtml}
+      <span class="chip-text">${label}</span>${dupeTag}
       <div class="chip-actions">
         <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
-        </button>${closeBtn}
+        </button>
+        <button class="chip-action chip-close" data-action="close-single-tab" data-tab-url="${safeUrl}" title="Close this tab">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
       </div>
     </div>`;
 }
@@ -1267,8 +1271,12 @@ async function renderDomainView(realTabs) {
 
   if (domainGroups.length > 0 && openTabsSection) {
     if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Open tabs';
-    const closableCount = realTabs.filter(t => !isProtectedTab(t)).length;
-    openTabsSectionCount.innerHTML = `${buildViewToggle('domain')}${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''}${closableCount > 0 ? ` &nbsp;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${closableCount} tabs</button>` : ''}`;
+    const closableCount  = realTabs.filter(t => !isProtectedTab(t)).length;
+    const protectedCount = realTabs.length - closableCount;
+    const closeAllTooltip = protectedCount > 0
+      ? `Closes ${closableCount} tab${closableCount !== 1 ? 's' : ''}. Skips ${protectedCount} pinned/window tab${protectedCount !== 1 ? 's' : ''} — safe to use!`
+      : `Close all ${closableCount} tabs`;
+    openTabsSectionCount.innerHTML = `${buildViewToggle('domain')}${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''}${closableCount > 0 ? ` &nbsp;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;" title="${closeAllTooltip}">${ICONS.close} Close all ${closableCount} tabs</button>` : ''}`;
     openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     openTabsSection.style.display = 'block';
   } else if (openTabsSection) {
@@ -1321,8 +1329,12 @@ async function renderGroupView() {
 
   // Render section header with toggle + count
   if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Open tabs';
-  const closableCount = realTabs.filter(t => !isProtectedTab(t)).length;
-  openTabsSectionCount.innerHTML = `${buildViewToggle('group')}${groupCount} group${groupCount !== 1 ? 's' : ''}${ungroupedCount > 0 ? ` · ${ungroupedCount} ungrouped` : ''}${closableCount > 0 ? ` &nbsp;&nbsp;<button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${closableCount} tabs</button>` : ''}`;
+  const closableCount  = realTabs.filter(t => !isProtectedTab(t)).length;
+  const protectedCount = realTabs.length - closableCount;
+  const closeAllTooltip = protectedCount > 0
+    ? `Closes ${closableCount} tab${closableCount !== 1 ? 's' : ''}. Skips ${protectedCount} pinned/window tab${protectedCount !== 1 ? 's' : ''} — safe to use!`
+    : `Close all ${closableCount} tabs`;
+  openTabsSectionCount.innerHTML = `${buildViewToggle('group')}${groupCount} group${groupCount !== 1 ? 's' : ''}${ungroupedCount > 0 ? ` · ${ungroupedCount} ungrouped` : ''}${closableCount > 0 ? ` &nbsp;&nbsp;<button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;" title="${closeAllTooltip}">${ICONS.close} Close all ${closableCount} tabs</button>` : ''}`;
 
   // Render group cards + ungrouped section
   let html = '';
@@ -1554,12 +1566,10 @@ document.addEventListener('click', async (e) => {
     const tabUrl = actionEl.dataset.tabUrl;
     if (!tabUrl) return;
 
-    // Close the tab in Chrome directly (skip protected tabs)
+    // Close the tab in Chrome directly — single close has no restrictions
     const allTabs = await chrome.tabs.query({});
-    const tabsPerWindow = {};
-    for (const t of allTabs) tabsPerWindow[t.windowId] = (tabsPerWindow[t.windowId] || 0) + 1;
     const match = allTabs.find(t => t.url === tabUrl);
-    if (match && !match.pinned && tabsPerWindow[match.windowId] !== 1) await chrome.tabs.remove(match.id);
+    if (match) await chrome.tabs.remove(match.id);
     await fetchOpenTabs();
 
     playCloseSound();
