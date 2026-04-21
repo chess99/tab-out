@@ -558,6 +558,10 @@ function checkAndShowEmptyState() {
   const remaining = missionsEl.querySelectorAll('.mission-card:not(.closing)').length;
   if (remaining > 0) return;
 
+  // Also check actual tab data — DOM cards may be animating out while real tabs still exist
+  const realTabsRemaining = openTabs.filter(t => !isProtectedTab(t)).length;
+  if (realTabsRemaining > 0) return;
+
   missionsEl.innerHTML = `
     <div class="missions-empty-state">
       <div class="empty-checkmark">
@@ -1764,17 +1768,16 @@ document.addEventListener('click', async (e) => {
     const groupId = Number(actionEl.dataset.groupId);
     const groupTabs = openTabs.filter(t => t.groupId === groupId);
     const tabIds = groupTabs.map(t => t.id);
-    await closeTabsByIds(tabIds);
-    playCloseSound();
+    // Shoot confetti before closing so card is still in DOM
     const card = document.querySelector(`[data-group-id="group-${groupId}"]`);
     if (card) {
       const rect = card.getBoundingClientRect();
       shootConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
-      animateCardOut(card);
     }
-    const statTabs = document.getElementById('statTabs');
-    if (statTabs) statTabs.textContent = openTabs.length;
+    await closeTabsByIds(tabIds);
+    playCloseSound();
     showToast(`Closed ${tabIds.length} tab${tabIds.length !== 1 ? 's' : ''} from group`);
+    await renderDashboard();
     return;
   }
 
