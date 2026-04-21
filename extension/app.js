@@ -1629,13 +1629,20 @@ document.addEventListener('click', async (e) => {
     if (match) await chrome.tabs.remove(match.id);
     await fetchOpenTabs();
 
-    // Animate chip out
+    // Animate chip out, then remove card if empty
     const chip = actionEl.closest('.page-chip');
     if (chip) {
       chip.style.transition = 'opacity 0.2s, transform 0.2s';
       chip.style.opacity    = '0';
       chip.style.transform  = 'scale(0.8)';
-      setTimeout(() => chip.remove(), 200);
+      setTimeout(() => {
+        chip.remove();
+        document.querySelectorAll('.mission-card').forEach(c => {
+          if (c.querySelectorAll('.page-chip[data-action="focus-tab"]').length === 0) {
+            animateCardOut(c);
+          }
+        });
+      }, 200);
     }
 
     showToast('Saved for later');
