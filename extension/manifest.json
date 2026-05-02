@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Tab Out",
+  "name": "Tab Out · by Cearl",
   "version": "1.0.0",
-  "description": "Keep tabs on your tabs. New tab page that groups your open tabs by domain and lets you close them with style.",
+  "description": "新标签页变成标签管理中心。按域名分组，支持 Chrome 标签组视图、自定义分组、保护标签等增强功能。",
   "permissions": ["tabs", "activeTab", "storage", "tabGroups"],
   "chrome_url_overrides": { "newtab": "index.html" },
   "background": { "service_worker": "background.js" },
