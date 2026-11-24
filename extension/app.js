@@ -247,30 +247,84 @@ async function focusTab(url) {
 }
 
 /**
- * closeDuplicateTabs(urls, keepOne)
- *
- * Closes duplicate tabs for the given list of URLs.
- * keepOne=true → keep one copy of each, close the rest.
- * keepOne=false → close all copies.
+ * Plan removals from one rendered card or ungrouped section. The snapshot
+ * contains only members of that scope, not every tab with a matching URL.
  */
-async function closeDuplicateTabs(urls, keepOne = true) {
-  const allTabs = await chrome.tabs.query({});
-  const toClose = [];
+function planDuplicateClosures(scope, allTabs) {
+  const byId = new Map(allTabs.map(tab => [tab.id, tab]));
+  const windowCounts = new Map();
+  for (const tab of allTabs) {
+    windowCounts.set(tab.windowId, (windowCounts.get(tab.windowId) || 0) + 1);
+  }
 
-  for (const url of urls) {
-    const matching = allTabs.filter(t => t.url === url);
-    if (keepOne) {
-      const keep = matching.find(t => t.active) || matching[0];
-      for (const tab of matching) {
-        if (tab.id !== keep.id) toClose.push(tab.id);
-      }
-    } else {
-      for (const tab of matching) toClose.push(tab.id);
+  const groups = new Map();
+  for (const [id, url, windowId, groupId] of scope) {
+    const tab = byId.get(id);
+    if (!url || !tab || tab.url !== url || (tab.pendingUrl && tab.pendingUrl !== url) ||
+        tab.windowId !== windowId || tab.groupId !== groupId) continue;
+    if (!groups.has(url)) groups.set(url, []);
+    groups.get(url).push(tab);
+  }
+
+  const protectedTab = tab => tab.pinned || windowCounts.get(tab.windowId) === 1;
+  const closing = new Set();
+  for (const matching of groups.values()) {
+    if (matching.length < 2) continue;
+    const keep = matching.find(protectedTab) || matching.find(tab => tab.active) || matching[0];
+    for (const tab of matching) {
+      if (tab !== keep && !protectedTab(tab)) closing.add(tab.id);
     }
   }
 
-  if (toClose.length > 0) await chrome.tabs.remove(toClose);
-  await fetchOpenTabs();
+  // Several URLs can each have a survivor elsewhere while their removals
+  // together would close a window. Retain its active tab if possible.
+  const closingPerWindow = new Map();
+  for (const id of closing) {
+    const tab = byId.get(id);
+    if (!closingPerWindow.has(tab.windowId)) closingPerWindow.set(tab.windowId, []);
+    closingPerWindow.get(tab.windowId).push(tab);
+  }
+  for (const [windowId, tabs] of closingPerWindow) {
+    if (tabs.length === windowCounts.get(windowId)) {
+      closing.delete((tabs.find(tab => tab.active) || tabs[0]).id);
+    }
+  }
+  return closing;
+}
+
+function renderDuplicateCloseButton(tabs, urlCounts) {
+  const scope = tabs.filter(tab => urlCounts[tab.url] > 1)
+    .map(tab => [tab.id, tab.url, tab.windowId, tab.groupId]);
+  const count = planDuplicateClosures(scope, openTabs).size;
+  if (!count) return '';
+  const encoded = encodeURIComponent(JSON.stringify(scope));
+  return `<button class="action-btn" data-action="dedup-keep-one" data-duplicate-scope="${encoded}">Close ${count} duplicate${count !== 1 ? 's' : ''}</button>`;
+}
+
+let duplicateCloseInProgress = false;
+
+async function closeDuplicateTabs(scope) {
+  let closed = 0;
+  let failed = false;
+  try {
+    const live = await chrome.tabs.query({});
+    const targets = planDuplicateClosures(scope, live);
+    for (const id of targets) {
+      // A tab may be pinned, moved, closed or navigated while we are working.
+      // Recheck membership and both survivor guarantees; never add targets.
+      const current = await chrome.tabs.query({});
+      if (!planDuplicateClosures(scope, current).has(id)) continue;
+      try {
+        await chrome.tabs.remove(id);
+        closed += 1;
+      } catch {
+        failed = true;
+      }
+    }
+  } catch {
+    failed = true;
+  }
+  return { closed, failed };
 }
 
 /**
@@ -997,13 +1051,7 @@ function renderDomainCard(group) {
       Close ${closableCount} tab${closableCount !== 1 ? 's' : ''}
     </button>` : '';
 
-  if (hasDupes) {
-    const dupeUrlsEncoded = dupeUrls.map(([url]) => encodeURIComponent(url)).join(',');
-    actionsHtml += `
-      <button class="action-btn" data-action="dedup-keep-one" data-dupe-urls="${dupeUrlsEncoded}">
-        Close ${totalExtras} duplicate${totalExtras !== 1 ? 's' : ''}
-      </button>`;
-  }
+  actionsHtml += renderDuplicateCloseButton(tabs, urlCounts);
 
   return `
     <div class="mission-card domain-card ${hasDupes ? 'has-amber-bar' : 'has-neutral-bar'}" data-domain-id="${stableId}">
@@ -1371,7 +1419,7 @@ function renderTabGroupCard(groupInfo, tabs) {
   const name   = groupInfo.title || '(unnamed)';
   const tabCount = tabs.length;
 
-  const { urlCounts, uniqueTabs, hasDupes, totalExtras, dupeUrls } = detectDuplicateTabs(tabs);
+  const { urlCounts, uniqueTabs, hasDupes, totalExtras } = detectDuplicateTabs(tabs);
 
   const tabBadge = `<span class="open-tabs-badge">
     ${ICONS.tabs}
@@ -1402,13 +1450,7 @@ function renderTabGroupCard(groupInfo, tabs) {
       Ungroup
     </button>`;
 
-  if (hasDupes) {
-    const dupeUrlsEncoded = dupeUrls.map(([url]) => encodeURIComponent(url)).join(',');
-    actionsHtml += `
-      <button class="action-btn" data-action="dedup-keep-one" data-dupe-urls="${dupeUrlsEncoded}">
-        Close ${totalExtras} duplicate${totalExtras !== 1 ? 's' : ''}
-      </button>`;
-  }
+  actionsHtml += renderDuplicateCloseButton(tabs, urlCounts);
 
   const stableId = 'group-' + String(groupInfo.id);
 
@@ -1438,18 +1480,14 @@ function renderTabGroupCard(groupInfo, tabs) {
  * NOT a full domain card — just a labeled chip section.
  */
 function renderUngroupedSection(ungroupedTabs) {
-  const { urlCounts, uniqueTabs, hasDupes, totalExtras, dupeUrls } = detectDuplicateTabs(ungroupedTabs);
+  const { urlCounts, uniqueTabs, hasDupes } = detectDuplicateTabs(ungroupedTabs);
 
   const chips = uniqueTabs.map(tab => {
     const label = cleanTitle(smartTitle(stripTitleNoise(tab.title || ''), tab.url), '');
     return buildPageChip(tab, label, urlCounts);
   }).join('');
 
-  let dedupBtn = '';
-  if (hasDupes) {
-    const enc = dupeUrls.map(([url]) => encodeURIComponent(url)).join(',');
-    dedupBtn = `<button class="action-btn" data-action="dedup-keep-one" data-dupe-urls="${enc}">Close ${totalExtras} duplicate${totalExtras !== 1 ? 's' : ''}</button>`;
-  }
+  const dedupBtn = renderDuplicateCloseButton(ungroupedTabs, urlCounts);
 
   return `
     <div class="ungrouped-section${hasDupes ? ' has-dupes' : ''}">
@@ -1555,7 +1593,6 @@ document.addEventListener('click', async (e) => {
   }
 
   const card = actionEl.closest('.mission-card');
-  const ungroupedSection = actionEl.closest('.ungrouped-section');
 
   // ---- Expand overflow chips ("+N more") ----
   if (action === 'expand-chips') {
@@ -1736,48 +1773,26 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
-  // ---- Close duplicates, keep one copy ----
+  // ---- Close duplicates only within this rendered scope ----
   if (action === 'dedup-keep-one') {
-    const urlsEncoded = actionEl.dataset.dupeUrls || '';
-    const urls = urlsEncoded.split(',').map(u => decodeURIComponent(u)).filter(Boolean);
-    if (urls.length === 0) return;
+    if (duplicateCloseInProgress) return;
+    const scope = JSON.parse(decodeURIComponent(actionEl.dataset.duplicateScope || '%5B%5D'));
+    if (scope.length === 0) return;
 
-    await closeDuplicateTabs(urls, true);
-    playCloseSound();
-
-    // Hide the dedup button
-    actionEl.style.transition = 'opacity 0.2s';
-    actionEl.style.opacity    = '0';
-    setTimeout(() => actionEl.remove(), 200);
-
-    // Remove dupe badges from the card
-    if (card) {
-      card.querySelectorAll('.chip-dupe-badge').forEach(b => {
-        b.style.transition = 'opacity 0.2s';
-        b.style.opacity    = '0';
-        setTimeout(() => b.remove(), 200);
-      });
-      card.querySelectorAll('.open-tabs-badge').forEach(badge => {
-        if (badge.textContent.includes('duplicate')) {
-          badge.style.transition = 'opacity 0.2s';
-          badge.style.opacity    = '0';
-          setTimeout(() => badge.remove(), 200);
-        }
-      });
-      card.classList.remove('has-amber-bar');
-      card.classList.add('has-neutral-bar');
+    duplicateCloseInProgress = true;
+    actionEl.disabled = true;
+    try {
+      const { closed, failed } = await closeDuplicateTabs(scope);
+      if (closed > 0) playCloseSound();
+      const message = closed > 0
+        ? `Closed ${closed} duplicate tab${closed !== 1 ? 's' : ''}.`
+        : 'No duplicate tabs closed.';
+      showToast(failed ? `${message} Some tabs could not be checked or closed.` : message);
+      await renderDashboard();
+    } finally {
+      duplicateCloseInProgress = false;
+      actionEl.disabled = false;
     }
-
-    if (ungroupedSection) {
-      ungroupedSection.querySelectorAll('.chip-dupe-badge').forEach(b => {
-        b.style.transition = 'opacity 0.2s';
-        b.style.opacity = '0';
-        setTimeout(() => b.remove(), 200);
-      });
-      ungroupedSection.classList.remove('has-dupes');
-    }
-
-    showToast('Closed duplicates, kept one copy each');
     return;
   }
 
